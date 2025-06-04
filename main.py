@@ -1,6 +1,7 @@
 import json
 import webbrowser
 from pathlib import Path
+from pprint import pprint
 from urllib import parse
 
 import pkce
@@ -8,21 +9,31 @@ import requests
 
 client_id = "4fef09bdb7c74a278129cc8304da0986"
 redirect_uri = "https://krishs-site.netlify.app/test"
-# token_file = Path.home() / ".config" / "spotify-cli" / "tokens.txt"
-token_file = Path.cwd() / "tokens.txt"
+token_file = Path.home() / ".config" / "spotify-cli" / "tokens.txt"
 
 
 def storeTokens(tokens) -> None:
+    accTok, refTok = tokens
+
+    tokens_json = {"access_token": accTok, "refresh_token": refTok}
+
     if token_file.exists():
         with open(token_file, "w", encoding="utf-8") as file:
-            json.dump(tokens, file)
+            json.dump(tokens_json, file)
     else:
         print("token file doesnt exist! Returning empty tokens")
 
 
 def getTokens() -> tuple[str, str]:
+    """
+    Reads and returns the tokens from the file
+
+    Returns:
+    tuple[str, str]: access_token, refresh_token
+    """
+
     if token_file.exists():
-        with open(token_file, "w", encoding="utf-8") as file:
+        with open(token_file, "r", encoding="utf-8") as file:
             tokens = json.load(file)
             access_token = tokens["access_token"]
             refresh_token = tokens["refresh_token"]
@@ -96,6 +107,7 @@ def auth() -> tuple[str, str]:
         "code_challenge_method": "S256",
         "code_challenge": codeChallenge,
         "redirect_uri": redirect_uri,
+        "scope": "user-library-read user-read-private user-read-email",
     }
 
     # Build the entire url by appending the params
@@ -145,19 +157,78 @@ def auth() -> tuple[str, str]:
         access_token = data["access_token"]
         refresh_token = data["refresh_token"]
 
-        storeTokens({"access_token": access_token, "refresh_token": refresh_token})
+        storeTokens((access_token, refresh_token))
 
-        return access_token, refresh_token
+        return (access_token, refresh_token)
 
     else:
         print("Access token response failed!")
         print("Error: ", token_response.status_code)
 
-        return "", ""
+        return ("", "")
 
 
-getTokens()
-# accTok, refTok = auth()
-print()
-print()
-# accTok, refTok = refreshAccessToken(refTok)
+def GETRequestAsDict(endpoint, name="obj"):
+    """
+    Template for getting GET requests from spotify
+    """
+
+    (accTok, _) = getTokens()
+
+    response: requests.Response = requests.request(
+        "GET",
+        f"https://api.spotify.com/v1/{endpoint}",
+        headers={"Authorization": f"Bearer {accTok}"},
+        timeout=10,
+    )
+
+    if response.ok:
+        print(f"obtained current {name} data!")
+        print()
+        return response.json()
+    else:
+        print(f"Error obtaining {name} data!")
+        print("Error: ", response.status_code)
+        return {"": ""}
+
+
+def getCurrentUserData() -> dict[str, str]:
+    (accTok, _) = getTokens()
+
+    response: requests.Response = requests.request(
+        "GET",
+        "https://api.spotify.com/v1/me",
+        headers={"Authorization": f"Bearer {accTok}"},
+        timeout=10,
+    )
+
+    if response.ok:
+        print("obtained current user data!")
+        print()
+        return response.json()
+    else:
+        print("Error obtaining user data!")
+        print("Error: ", response.status_code)
+        return {"": ""}
+
+
+def getCurrentUserTracks() -> dict:
+    return GETRequestAsDict("me/tracks")
+
+
+# print(getTokens())
+
+# storeTokens(auth())
+(currentAccTok, currentRefTok) = getTokens()
+newAccTok, newRefTok = refreshAccessToken(currentRefTok)
+storeTokens((newAccTok, newRefTok))
+
+
+userTracks = getCurrentUserTracks()
+
+tracks = []
+for item in userTracks["items"]:
+    track = item["track"]
+    tracks.append(track["name"])
+
+pprint(tracks)
