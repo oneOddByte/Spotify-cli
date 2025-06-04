@@ -168,7 +168,7 @@ def auth() -> tuple[str, str]:
         return ("", "")
 
 
-def GETRequestAsDict(endpoint, name="obj"):
+def GETRequestAsDict(endpoint, name="obj", params={}) -> dict:
     """
     Template for getting GET requests from spotify
     """
@@ -179,12 +179,11 @@ def GETRequestAsDict(endpoint, name="obj"):
         "GET",
         f"https://api.spotify.com/v1/{endpoint}",
         headers={"Authorization": f"Bearer {accTok}"},
+        params=params,
         timeout=10,
     )
 
     if response.ok:
-        print(f"obtained current {name} data!")
-        print()
         return response.json()
     else:
         print(f"Error obtaining {name} data!")
@@ -212,11 +211,36 @@ def getCurrentUserData() -> dict[str, str]:
         return {"": ""}
 
 
-def getCurrentUserTracks() -> dict:
-    return GETRequestAsDict("me/tracks")
+def getAllSavedTracks() -> list[str]:
+    """
+    Fetches all saved tracks from the current user's Spotify library.
+    Returns:
+        List of track names.
+    """
+    tracks = []
+    offset = 0
+    limit = 50
 
+    while True:
+        userTracks = GETRequestAsDict(
+            "me/tracks", name="user tracks", params={"limit": limit, "offset": offset}
+        )
 
-# print(getTokens())
+        if "items" not in userTracks:
+            break  # Something went wrong
+
+        for item in userTracks["items"]:
+            track = item["track"]
+            if track:  # Safety check
+                tracks.append(track["name"])
+
+        if userTracks["next"] is None:
+            break
+
+        offset += limit
+
+    return tracks
+
 
 # storeTokens(auth())
 (currentAccTok, currentRefTok) = getTokens()
@@ -224,11 +248,4 @@ newAccTok, newRefTok = refreshAccessToken(currentRefTok)
 storeTokens((newAccTok, newRefTok))
 
 
-userTracks = getCurrentUserTracks()
-
-tracks = []
-for item in userTracks["items"]:
-    track = item["track"]
-    tracks.append(track["name"])
-
-pprint(tracks)
+pprint(getAllSavedTracks())
