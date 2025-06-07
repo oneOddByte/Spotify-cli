@@ -2,17 +2,30 @@ import json
 import webbrowser
 from pathlib import Path
 from pprint import pprint
+from typing import List
 from urllib import parse
 
 import pkce
 import requests
 
+# client_id for the app registered in the dev-dashboard
 client_id = "4fef09bdb7c74a278129cc8304da0986"
+
+# uri where spotify's login screen redirects to
 redirect_uri = "https://krishs-site.netlify.app/test"
+
 token_file = Path.home() / ".config" / "spotify-cli" / "tokens.txt"
 
 
-def storeTokens(tokens) -> None:
+def storeTokens(tokens: tuple[str, str]) -> None:
+    """
+    Stores the given tokens in the token_file
+
+    Parameters:
+    tuple[str, str]: access_token, refresh_token
+    """
+
+    # unpacking the tokens
     accTok, refTok = tokens
 
     tokens_json = {"access_token": accTok, "refresh_token": refTok}
@@ -53,6 +66,7 @@ def refreshAccessToken(refresh_token) -> tuple[str, str]:
         str: New refresh token
     """
 
+    # Constructing the data as per spotify's API
     data = {
         "client_id": client_id,
         "grant_type": "refresh_token",
@@ -107,7 +121,7 @@ def auth() -> tuple[str, str]:
         "code_challenge_method": "S256",
         "code_challenge": codeChallenge,
         "redirect_uri": redirect_uri,
-        "scope": "user-library-read user-read-private user-read-email",
+        "scope": "user-library-read user-read-private user-read-email user-read-playback-state",
     }
 
     # Build the entire url by appending the params
@@ -117,14 +131,14 @@ def auth() -> tuple[str, str]:
     print("Opening browser")
     webbrowser.open(auth_url)
 
-    # Get the redirect response
+    # Get the redirect response as the input
     redirect_response = input("Paste the entire url after login: \n")
 
     # Parse the query string to get the code
     parsed: parse.ParseResult = parse.urlparse(redirect_response)
-    code = parse.parse_qs(parsed.query).get("code", [None])[0]
+    auth_code = parse.parse_qs(parsed.query).get("code", [None])[0]
 
-    if not code:
+    if not auth_code:
         print("Received no code")
         error = parse.parse_qs(parsed.query).get("error", [None])[0]
         print("error: ", error)
@@ -132,10 +146,10 @@ def auth() -> tuple[str, str]:
         print("Received code")
 
     #
-    # Requesting an access token
+    # Requesting an access token using the authentication code
     token_params = {
         "grant_type": "authorization_code",
-        "code": code,
+        "code": auth_code,
         "redirect_uri": redirect_uri,
         "client_id": client_id,
         "code_verifier": codeVerifier,
@@ -154,9 +168,11 @@ def auth() -> tuple[str, str]:
 
         data = token_response.json()
 
+        # Get the tokens from the response
         access_token = data["access_token"]
         refresh_token = data["refresh_token"]
 
+        # Store the tokens
         storeTokens((access_token, refresh_token))
 
         return (access_token, refresh_token)
@@ -187,11 +203,18 @@ def GETRequestAsDict(endpoint, name="obj", params={}) -> dict:
         return response.json()
     else:
         print(f"Error obtaining {name} data!")
-        print("Error: ", response.status_code)
+        print("Error: ", response.status_code, " - ", response.text)
         return {"": ""}
 
 
 def getCurrentUserData() -> dict[str, str]:
+    """
+    Returns current users data
+
+    Returns:
+    dict[str, str]: JSON format of the data
+    """
+
     (accTok, _) = getTokens()
 
     response: requests.Response = requests.request(
@@ -211,12 +234,14 @@ def getCurrentUserData() -> dict[str, str]:
         return {"": ""}
 
 
-def getAllSavedTracks() -> list[str]:
+def getAllSavedTracks() -> list:
     """
-    Fetches all saved tracks from the current user's Spotify library.
+    Fetches all saved tracks from the current user's Spotify library. Also handles pagination to get all the tracks.
+
     Returns:
         List of track names.
     """
+
     tracks = []
     offset = 0
     limit = 50
@@ -232,8 +257,10 @@ def getAllSavedTracks() -> list[str]:
         for item in userTracks["items"]:
             track = item["track"]
             if track:  # Safety check
-                tracks.append(track["name"])
+                tracks.append(track)
 
+        # next contains the url to the next page of items
+        # if it is none, there are no more items
         if userTracks["next"] is None:
             break
 
@@ -242,10 +269,41 @@ def getAllSavedTracks() -> list[str]:
     return tracks
 
 
+# ISSUE: This feature is depreciated!!!
+def getAudioFeaturesWithIds(ids: List[str]) -> List[str]:
+    """
+    !! THIS FEATURE IS DEPRECIATED !!
+    Returns the audio-features of the songs with given IDs
+
+    Returns:
+    List[str]: list containing the audio-features
+    """
+
+    ids_param = ",".join(ids)
+
+    response = GETRequestAsDict(
+        "audio-features", name="audio features", params={"ids": ids_param}
+    )
+
+    if "audio_features" not in response:
+        print("something went wrong: audio features")
+
+    return list(response.get("audio_features", []))
+
+
+# Authenticate and store the access and refresh tokens
 # storeTokens(auth())
+
+# Refresh and store the tokens
 (currentAccTok, currentRefTok) = getTokens()
 newAccTok, newRefTok = refreshAccessToken(currentRefTok)
 storeTokens((newAccTok, newRefTok))
 
+tracks = getAllSavedTracks()
 
-pprint(getAllSavedTracks())
+trackNames = [track["name"] for track in tracks]
+pprint(trackNames)
+
+trackIds = [track["id"] for track in tracks]
+# BUG: This causes issues as the api is depreciated
+pprint(getAudioFeaturesWithIds(trackIds[:5]))
